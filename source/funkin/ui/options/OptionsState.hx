@@ -78,6 +78,7 @@ class OptionsState extends MusicBeatState
     var offsets:OffsetMenu = optionsCodex.addPage(Offsets, new OffsetMenu());
     #end
     var saveData:SaveDataMenu = optionsCodex.addPage(SaveData, new SaveDataMenu());
+    var saveSlots:SaveSlotsMenu = optionsCodex.addPage(SaveSlots, new SaveSlotsMenu());
 
     options.addSaveDataOptionsItem(saveData);
     options.addExitItem();
@@ -91,6 +92,7 @@ class OptionsState extends MusicBeatState
       offsets.onExit.add(exitOffsets);
       #end
       saveData.onExit.add(optionsCodex.switchPage.bind(Options));
+      saveSlots.onExit.add(optionsCodex.switchPage.bind(SaveData));
     }
     else
     {
@@ -402,4 +404,5 @@ enum abstract OptionsMenuPageName(String) to PageName
   public var Preferences = 'preferences';
   public var Offsets = 'offsets';
   public var SaveData = 'saveData';
+  public var SaveSlots = 'saveSlots';
 }

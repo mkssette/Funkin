@@ -818,8 +818,14 @@ class Constants
   public static inline final SAVE_NAME_LEGACY:String = 'funkin';
 
   /**
-   * We always use this save slot.
+   * We always use this save slot as the original/base save.
    * Alter this if you want to use a different save slot.
    */
   public static inline final BASE_SAVE_SLOT:Int = 1;
+
+  /**
+   * Total number of save slots available in the multisave system.
+   * Slot 1 is the original save, slots 2 and up are additional slots.
+   */
+  public static inline final MAX_SAVE_SLOTS:Int = 5;
 }

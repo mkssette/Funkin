@@ -24,6 +24,10 @@ import flixel.util.FlxSave.LoadFailureType;
 import funkin.api.newgrounds.Medals;
 import funkin.api.newgrounds.Leaderboards;
 #end
+import funkin.Preferences;
+import funkin.PlayerSettings;
+import funkin.util.Constants;
+import funkin.util.WindowUtil;
 
 @:nullSafety
 @:build(funkin.util.macro.SaveMacro.buildSaveProperties())
@@ -45,6 +49,55 @@ class Save implements ConsoleClass implements ISerializable
   public static var system:SaveSystem = new SaveSystem();
 
   /**
+   * Name of the metadata save file used to track persistent system settings
+   * like the active save slot across game launches.
+   */
+  static final META_SAVE_NAME:String = Constants.SAVE_NAME + '_meta';
+
+  /**
+   * The currently active save slot.
+   * Slot 1 is the original/base save file.
+   * Slot 2 and up are additional save slots.
+   */
+  public static var currentSlot(get, set):Int;
+
+  static var _currentSlot:Int = Constants.BASE_SAVE_SLOT;
+
+  static function get_currentSlot():Int
+  {
+    return _currentSlot;
+  }
+
+  static function set_currentSlot(value:Int):Int
+  {
+    if (value < 1) value = Constants.BASE_SAVE_SLOT;
+    if (_currentSlot == value) return value;
+    _currentSlot = value;
+    saveActiveSlotMeta(value);
+    return _currentSlot;
+  }
+
+  static function fetchActiveSlotMeta():Int
+  {
+    var metaSave:FlxSave = new FlxSave();
+    metaSave.bind(META_SAVE_NAME, Constants.SAVE_PATH);
+    var savedSlot:Null<Int> = metaSave.data?.activeSlot;
+    metaSave.destroy();
+    if (savedSlot == null || savedSlot < 1) return Constants.BASE_SAVE_SLOT;
+    return savedSlot;
+  }
+
+  static function saveActiveSlotMeta(slot:Int):Void
+  {
+    var metaSave:FlxSave = new FlxSave();
+    metaSave.bind(META_SAVE_NAME, Constants.SAVE_PATH);
+    if (metaSave.data == null) metaSave.mergeData({}, true);
+    metaSave.data.activeSlot = slot;
+    metaSave.flush();
+    metaSave.destroy();
+  }
+
+  /**
    * Singleton for our Save class
    */
   public static var instance(get, never):Save;
@@ -60,7 +113,7 @@ class Save implements ConsoleClass implements ISerializable
   var data:RawSaveData;
 
   /**
-   * Load the game's save data from disk.
+   * Load the game's save data from disk for the currently active slot.
    *
    * @param force Whether to force a reload from disk, even if the save data is already loaded.
    * @return The resulting Save.
@@ -72,19 +125,258 @@ class Save implements ConsoleClass implements ISerializable
     if (force) _instance = null;
     if (!force && _instance != null) return _instance;
 
+    _currentSlot = fetchActiveSlotMeta();
+
     // Bind save data.
-    final loadedSave:Save = loadFromSlot(Constants.BASE_SAVE_SLOT);
+    final loadedSave:Save = loadFromSlot(_currentSlot);
     _instance ??= loadedSave;
 
     return loadedSave;
   }
 
   /**
-   * Clear the game's save data and write the default values to disk.
+   * Clear the currently active save slot and write default values.
    */
   public static function clearData():Void
   {
-    _instance = Save.system.clearSlot(Constants.BASE_SAVE_SLOT);
+    clearSlot(_currentSlot);
+  }
+
+  /**
+   * Clear a specific save slot and write default values.
+   * If the slot is currently active, it reloads preferences and controls.
+   *
+   * @param slot The save slot to clear.
+   */
+  public static function clearSlot(slot:Int):Void
+  {
+    if (slot == _currentSlot)
+    {
+      _instance = Save.system.clearSlot(slot);
+      Preferences.init();
+      PlayerSettings.init();
+      return;
+    }
+    Save.system.clearSlot(slot);
+  }
+
+  /**
+   * Switches the active save slot, flushing the previous one first.
+   * Reloads preferences and player controls.
+   *
+   * @param slot The slot to switch to (1 for original, 2+ for extra slots).
+   * @return The newly loaded Save instance.
+   */
+  public static function switchSlot(slot:Int):Save
+  {
+    if (slot < 1) slot = Constants.BASE_SAVE_SLOT;
+
+    Save.system.flush();
+
+    currentSlot = slot;
+    _instance = loadFromSlot(slot);
+
+    Preferences.init();
+    PlayerSettings.init();
+
+    return _instance;
+  }
+
+  /**
+   * Copies save data from one slot to another.
+   * Slot 1 (original) can NEVER be overwritten.
+   *
+   * @param fromSlot Source slot.
+   * @param toSlot Target slot to overwrite.
+   * @return Whether the copy operation succeeded.
+   */
+  public static function copySlot(fromSlot:Int, toSlot:Int):Bool
+  {
+    if (fromSlot == toSlot) return false;
+    if (toSlot == Constants.BASE_SAVE_SLOT) return false; // Never alter the original slot 1!
+
+    if (fromSlot == _currentSlot) Save.system.flush();
+
+    var sourceData:Null<Dynamic> = fetchFromSlotRaw(fromSlot);
+    if (sourceData == null) return false;
+
+    var targetSaveData:FlxSave = new FlxSave();
+    targetSaveData.bind(Constants.SAVE_NAME + toSlot, Constants.SAVE_PATH);
+    targetSaveData.mergeData(thx.Dynamics.clone(sourceData), true);
+    targetSaveData.flush();
+    targetSaveData.destroy();
+
+    if (toSlot == _currentSlot)
+    {
+      _instance = loadFromSlot(toSlot);
+      Preferences.init();
+      PlayerSettings.init();
+    }
+
+    return true;
+  }
+
+  /**
+   * Returns the directory on disk where the game's .sol save files are stored.
+   */
+  public static function getSaveDirectory():String
+  {
+    #if sys
+    var storageDir:String = lime.system.System.applicationStorageDirectory;
+    return haxe.io.Path.normalize('$storageDir/../../../${Constants.SAVE_PATH}');
+    #else
+    return '';
+    #end
+  }
+
+  /**
+   * Returns the absolute path on disk to the Funkin#.sol save file for a given slot.
+   */
+  public static function getSlotFilePath(slot:Int):String
+  {
+    #if sys
+    var dir:String = getSaveDirectory();
+    return haxe.io.Path.normalize('$dir/${Constants.SAVE_NAME}$slot.sol');
+    #else
+    return '';
+    #end
+  }
+
+  /**
+   * Dynamically scans the save directory and returns all existing Funkin#.sol slots.
+   * Slot 1 (BASE_SAVE_SLOT) is always included as the original slot.
+   */
+  public static function getExistingSlots():Array<Int>
+  {
+    var foundSlots:Map<Int, Bool> = new Map<Int, Bool>();
+
+    // Slot 1 is always guaranteed to be present as the original slot
+    foundSlots.set(Constants.BASE_SAVE_SLOT, true);
+
+    #if sys
+    var saveDir:String = getSaveDirectory();
+    if (sys.FileSystem.exists(saveDir) && sys.FileSystem.isDirectory(saveDir))
+    {
+      var regex:EReg = new EReg('^' + Constants.SAVE_NAME + '(\\d+)\\.sol$', 'i');
+      for (file in sys.FileSystem.readDirectory(saveDir))
+      {
+        if (regex.match(file))
+        {
+          var slotNum:Null<Int> = Std.parseInt(regex.matched(1));
+          if (slotNum != null && slotNum >= 1 && slotNum < 1000)
+          {
+            foundSlots.set(slotNum, true);
+          }
+        }
+      }
+    }
+    #end
+
+    var slots:Array<Int> = [];
+    for (slot in foundSlots.keys())
+    {
+      slots.push(slot);
+    }
+    slots.sort((a, b) -> a - b);
+    return slots;
+  }
+
+  /**
+   * Finds the next available slot number for creating a new slot.
+   */
+  public static function getNextAvailableSlot():Int
+  {
+    var existing:Array<Int> = getExistingSlots();
+    var candidate:Int = 2;
+    while (existing.contains(candidate))
+    {
+      candidate++;
+    }
+    return candidate;
+  }
+
+  /**
+   * Creates a new save slot as a fresh Funkin#.sol file on disk.
+   * @return The newly created slot number.
+   */
+  public static function createNewSlot():Int
+  {
+    var newSlot:Int = getNextAvailableSlot();
+    var freshSave:Save = new Save();
+    var targetSaveData = new FlxSave();
+    targetSaveData.bind(Constants.SAVE_NAME + newSlot, Constants.SAVE_PATH);
+    targetSaveData.mergeData(freshSave.data, true);
+    targetSaveData.flush();
+    targetSaveData.destroy();
+    return newSlot;
+  }
+
+  /**
+   * Deletes a save slot and removes its corresponding Funkin#.sol file from disk.
+   * Slot 1 (original) can NEVER be deleted.
+   * @param slot The slot to delete.
+   * @return Whether the deletion succeeded.
+   */
+  public static function deleteSlot(slot:Int):Bool
+  {
+    if (slot == Constants.BASE_SAVE_SLOT) return false; // Never alter original!
+
+    #if sys
+    var filePath:String = getSlotFilePath(slot);
+    if (sys.FileSystem.exists(filePath))
+    {
+      try
+      {
+        sys.FileSystem.deleteFile(filePath);
+      }
+      catch (e:Dynamic)
+      {
+        trace('[SAVE] Could not delete save file: $filePath');
+      }
+    }
+    #end
+
+    Save.system.clearSlot(slot);
+
+    if (_currentSlot == slot)
+    {
+      switchSlot(Constants.BASE_SAVE_SLOT);
+    }
+
+    return true;
+  }
+
+  /**
+   * Return true if the given slot contains save data.
+   */
+  public static function hasSlotData(slot:Int):Bool
+  {
+    return querySlot(slot);
+  }
+
+  /**
+   * Returns a friendly display name for a slot.
+   */
+  public static function getSlotName(slot:Int):String
+  {
+    if (slot == Constants.BASE_SAVE_SLOT) return 'SLOT 1 (ORIGINAL)';
+    return 'SLOT $slot';
+  }
+
+  /**
+   * Returns a short summary of the save slot data.
+   */
+  public static function getSlotSummary(slot:Int):String
+  {
+    if (!querySlot(slot)) return 'EMPTY';
+
+    var raw:Null<Dynamic> = fetchFromSlotRaw(slot);
+    if (raw == null) return 'EMPTY';
+
+    var songsCount:Int = raw?.scores?.songs?.length ?? 0;
+    if (songsCount == 0) return 'NO CLEARS';
+    if (songsCount == 1) return '1 SONG CLEARED';
+    return '$songsCount SONGS CLEARED';
   }
 
   /**
@@ -966,11 +1258,12 @@ class Save implements ConsoleClass implements ISerializable
   }
 
   /**
-   * If you set slot to `2`, it will load an independent save file from slot 2.
+   * Loads an independent save file from the specified slot.
+   * Slot 1 is the original/base save file. Slot 2 and up are additional save slots.
    * @param slot The save slot to load.
    */
   @:haxe.warning('-WDeprecated')
-  static function loadFromSlot(slot:Int):Save
+  public static function loadFromSlot(slot:Int):Save
   {
     trace('[SAVE] Loading save from slot $slot...');
 
@@ -979,22 +1272,32 @@ class Save implements ConsoleClass implements ISerializable
     switch (FlxG.save.status)
     {
       case EMPTY:
-        trace('[SAVE] Save data in slot ${slot} is empty, checking for legacy save data...');
-
-        switch (Save.system.fetchLegacySaveData())
+        if (slot == Constants.BASE_SAVE_SLOT)
         {
-          case None:
-            trace('[SAVE] No legacy save data found.');
-            var gameSave:Save = new Save();
-            FlxG.save.mergeData(gameSave.data, true);
-            return gameSave;
+          trace('[SAVE] Save data in slot ${slot} is empty, checking for legacy save data...');
 
-          case Some(legacySaveData):
-            trace('[SAVE] Found legacy save data. Converting...');
+          switch (Save.system.fetchLegacySaveData())
+          {
+            case None:
+              trace('[SAVE] No legacy save data found.');
+              var gameSave:Save = new Save();
+              FlxG.save.mergeData(gameSave.data, true);
+              return gameSave;
 
-            var gameSave = SaveDataMigrator.migrateFromLegacy(legacySaveData);
-            FlxG.save.mergeData(gameSave.data, true);
-            return gameSave;
+            case Some(legacySaveData):
+              trace('[SAVE] Found legacy save data. Converting...');
+
+              var gameSave = SaveDataMigrator.migrateFromLegacy(legacySaveData);
+              FlxG.save.mergeData(gameSave.data, true);
+              return gameSave;
+          }
+        }
+        else
+        {
+          trace('[SAVE] Slot ${slot} is empty. Creating fresh save data.');
+          var gameSave:Save = new Save();
+          FlxG.save.mergeData(gameSave.data, true);
+          return gameSave;
         }
 
       case BOUND(_, _):
@@ -1086,12 +1389,18 @@ class Save implements ConsoleClass implements ISerializable
     }
   }
 
-  static function fetchFromSlotRaw(slot:Int):Null<Dynamic>
+  public static function fetchFromSlotRaw(slot:Int):Null<Dynamic>
   {
     var targetSaveData = new FlxSave();
     targetSaveData.bind(Constants.SAVE_NAME + slot, Constants.SAVE_PATH);
-    if (targetSaveData.isEmpty()) return null;
-    return targetSaveData.data;
+    if (targetSaveData.isEmpty())
+    {
+      targetSaveData.destroy();
+      return null;
+    }
+    var rawData:Dynamic = thx.Dynamics.clone(targetSaveData.data);
+    targetSaveData.destroy();
+    return rawData;
   }
 
   /**
@@ -1100,23 +1409,25 @@ class Save implements ConsoleClass implements ISerializable
    * @return Whether the slot is not empty.
    */
   @:haxe.warning('-WDeprecated')
-  static function querySlot(slot:Int):Bool
+  public static function querySlot(slot:Int):Bool
   {
     var targetSaveData:FlxSave = new FlxSave();
     targetSaveData.bind(Constants.SAVE_NAME + slot, Constants.SAVE_PATH);
-    switch (targetSaveData.status)
+    var hasData:Bool = switch (targetSaveData.status)
     {
       case EMPTY:
-        return false;
+        false;
       case ERROR(_): // This value is deprecated.
-        return false;
+        false;
       case LOAD_ERROR(_):
-        return false;
+        false;
       case SAVE_ERROR(_):
-        return false;
+        false;
       case BOUND(_, _):
-        return true;
-    }
+        true;
+    };
+    targetSaveData.destroy();
+    return hasData;
   }
 
   /**
@@ -1197,7 +1508,7 @@ class Save implements ConsoleClass implements ISerializable
 
     funkin.api.newgrounds.NGSaveSlot.instance.load((data:Dynamic) ->
     {
-      FlxG.save.bind(Constants.SAVE_NAME + Constants.BASE_SAVE_SLOT, Constants.SAVE_PATH);
+      FlxG.save.bind(Constants.SAVE_NAME + _currentSlot, Constants.SAVE_PATH);
 
       if (FlxG.save.status != EMPTY)
       {
@@ -1207,7 +1518,7 @@ class Save implements ConsoleClass implements ISerializable
       }
 
       FlxG.save.erase();
-      FlxG.save.bind(Constants.SAVE_NAME + Constants.BASE_SAVE_SLOT, Constants.SAVE_PATH); // forces regeneration of the file as erase deletes it
+      FlxG.save.bind(Constants.SAVE_NAME + _currentSlot, Constants.SAVE_PATH); // forces regeneration of the file as erase deletes it
 
       var gameSave = SaveDataMigrator.migrate(data);
       FlxG.save.mergeData(gameSave.data, true);

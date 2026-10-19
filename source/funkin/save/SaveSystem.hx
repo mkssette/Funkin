@@ -3,6 +3,7 @@ package funkin.save;
 import funkin.save.migrator.RawSaveData_v1_0_0;
 import funkin.save.migrator.SaveDataMigrator;
 import flixel.util.FlxSave;
+import funkin.util.Constants;
 
 /**
  * A bit more of the backend and nitty gritty of FNF's save system
@@ -25,13 +26,26 @@ class SaveSystem
   {
     FlxG.save.bind(Constants.SAVE_NAME + slot, Constants.SAVE_PATH);
 
-    if (FlxG.save.status == EMPTY) return new Save();
+    if (FlxG.save.status == EMPTY)
+    {
+      if (slot != Save.currentSlot)
+      {
+        FlxG.save.bind(Constants.SAVE_NAME + Save.currentSlot, Constants.SAVE_PATH);
+      }
+      return new Save();
+    }
 
     // Archive the save data just in case.
     // Not reliable but better than nothing.
     var backupSlot:Int = Save.system.archiveBadSaveData(FlxG.save.data);
 
     FlxG.save.erase();
+
+    if (slot != Save.currentSlot)
+    {
+      FlxG.save.bind(Constants.SAVE_NAME + Save.currentSlot, Constants.SAVE_PATH);
+    }
+
     return new Save();
   }
 

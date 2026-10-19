@@ -20,14 +20,14 @@ class Prompt extends flixel.FlxSubState
 
   var style:ButtonStyle;
 
-  public function new(text:String, style:ButtonStyle = Ok)
+  public function new(text:String, style:ButtonStyle = Ok, font:AtlasFont = BOLD)
   {
     this.style = style;
     super(0x80000000);
 
     buttons = new TextMenuList(Horizontal);
 
-    field = new AtlasText(text, AtlasFont.BOLD);
+    field = new AtlasText(text, font);
     field.scrollFactor.set(0, 0);
   }
 
