@@ -3,6 +3,7 @@ package funkin.ui.debug.charting.handlers.editor;
 #if FEATURE_CHART_EDITOR
 import flixel.addons.display.FlxSliceSprite;
 import flixel.FlxSprite;
+import flixel.graphics.FlxGraphic;
 import flixel.math.FlxRect;
 import flixel.util.FlxColor;
 import funkin.data.song.SongData.SongTimeChange;
@@ -92,11 +93,16 @@ class ChartEditorThemeHandler
   // Thin horizontal lines on the grid.
   static final GRID_LINE_COLOR_LIGHT:FlxColor = 0xFF0E0E14;
   static final GRID_LINE_COLOR_DARK:FlxColor = 0xFFD0D0D8;
+  static final GRID_STEP_LINE_COLOR_LIGHT:FlxColor = 0xFF606068;
+  static final GRID_STEP_LINE_COLOR_DARK:FlxColor = 0xFF92929C;
 
   public static final GRID_MEASURE_LINE_WIDTH:Int = 2;
   public static final GRID_MEASURE_LINE_ALPHA:Float = 0.75;
   public static final GRID_BEAT_LINE_WIDTH:Int = 1;
   public static final GRID_BEAT_LINE_ALPHA:Float = 0.25;
+  public static final GRID_STEP_LINE_WIDTH:Int = 1;
+  public static final GRID_STEP_LINE_ALPHA:Float = 0.16;
+  public static final GRID_MIN_STEP_PIXELS:Float = 8;
 
   // Solid waveform drawn across each side's lanes.
   static final WAVEFORM_OVERLAY_COLOR_LIGHT:FlxColor = 0xFF2E4F9C;
@@ -105,6 +111,33 @@ class ChartEditorThemeHandler
   public static function getGridLineColor(theme:ChartEditorTheme):FlxColor
   {
     return (theme == Dark) ? GRID_LINE_COLOR_DARK : GRID_LINE_COLOR_LIGHT;
+  }
+
+  public static function getGridStepLineColor(theme:ChartEditorTheme):FlxColor
+  {
+    return theme == Dark ? GRID_STEP_LINE_COLOR_DARK : GRID_STEP_LINE_COLOR_LIGHT;
+  }
+
+  /**
+   * Shared solid and dotted frames for grid lines, with one-pixel dots every four pixels.
+   */
+  public static function getGridLineGraphic():FlxGraphic
+  {
+    var key:String = 'chartEditorGridLines';
+    var graphic:Null<FlxGraphic> = FlxG.bitmap.get(key);
+    if (graphic != null) return graphic;
+
+    var width:Int = ChartEditorState.GRID_SIZE * TOTAL_COLUMN_COUNT;
+    var bitmap:BitmapData = new BitmapData(width, 2, true, FlxColor.TRANSPARENT);
+    bitmap.fillRect(new Rectangle(0, 0, width, 1), FlxColor.WHITE);
+    var x:Int = 0;
+    while (x < width)
+    {
+      bitmap.setPixel32(x, 1, FlxColor.WHITE);
+      x += 4;
+    }
+
+    return FlxG.bitmap.add(bitmap, false, key);
   }
 
   public static function getWaveformOverlayColor(theme:ChartEditorTheme):FlxColor

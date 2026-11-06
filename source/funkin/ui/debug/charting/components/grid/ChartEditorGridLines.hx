@@ -122,7 +122,8 @@ class ChartEditorGridLines
     if (bitmap != null) backing.loadGraphic(bitmap);
 
     lineColor = ChartEditorThemeHandler.getGridLineColor(chartEditorState.currentTheme);
-    lines.forEach(line -> line.color = lineColor);
+    var stepLineColor:FlxColor = ChartEditorThemeHandler.getGridStepLineColor(chartEditorState.currentTheme);
+    lines.forEach(line -> line.color = line.animation.frameIndex == 1 ? stepLineColor : lineColor);
 
     var dividerColor:FlxColor = ChartEditorThemeHandler.getSideDividerColor(chartEditorState.currentTheme);
     dividers.forEach(divider -> divider.color = dividerColor);
@@ -402,6 +403,21 @@ class ChartEditorGridLines
     }
 
     if (!chartEditorState.showBeatLines) return;
+
+    var measureOffset:Float = measureStart * measureSteps - start;
+    var step:Int = Math.ceil(from - EPSILON);
+    while (step < to - EPSILON)
+    {
+      var stepPixels:Float = ChartEditorTimeScale.stepToPixels(step + 1) - ChartEditorTimeScale.stepToPixels(step);
+      var measureRemainder:Float = Math.abs((step + measureOffset) % measureSteps);
+      if (step % beatSteps != 0 && measureRemainder >= EPSILON && measureSteps - measureRemainder >= EPSILON
+        && stepPixels >= ChartEditorThemeHandler.GRID_MIN_STEP_PIXELS)
+      {
+        addLine(step, ChartEditorThemeHandler.GRID_STEP_LINE_WIDTH, ChartEditorThemeHandler.GRID_STEP_LINE_ALPHA, true);
+      }
+      step++;
+    }
+
     if (ChartEditorTimeScale.stepToPixels(from + beatSteps) - ChartEditorTimeScale.stepToPixels(from) < ChartEditorThemeHandler.GRID_MIN_BEAT_PIXELS) return;
 
     // Beats are counted from the start of the segment.
@@ -418,7 +434,7 @@ class ChartEditorGridLines
     }
   }
 
-  function addLine(step:Float, thickness:Int, alpha:Float):Void
+  function addLine(step:Float, thickness:Int, alpha:Float, dotted:Bool = false):Void
   {
     var line:FlxSprite;
     if (usedLines < lines.members.length && lines.members[usedLines] != null)
@@ -432,9 +448,10 @@ class ChartEditorGridLines
       lines.add(line);
     }
     usedLines++;
+    line.animation.frameIndex = dotted ? 1 : 0;
     line.setGraphicSize(ChartEditorState.GRID_SIZE * ChartEditorThemeHandler.TOTAL_COLUMN_COUNT, thickness);
     line.updateHitbox();
-    line.color = lineColor;
+    line.color = dotted ? ChartEditorThemeHandler.getGridStepLineColor(chartEditorState.currentTheme) : lineColor;
     line.alpha = alpha;
     line.setPosition(lines.x, Math.round(lines.y + ChartEditorTimeScale.stepToPixels(step)) - Std.int(thickness / 2));
   }
@@ -470,7 +487,10 @@ class ChartEditorGridLines
 
   function makeLine():FlxSprite
   {
-    return new FunkinSprite().makeSolidColor(2, 2, FlxColor.WHITE);
+    var width:Int = ChartEditorState.GRID_SIZE * ChartEditorThemeHandler.TOTAL_COLUMN_COUNT;
+    var line:FlxSprite = new FunkinSprite().loadGraphic(ChartEditorThemeHandler.getGridLineGraphic(), true, width, 1);
+    line.antialiasing = false;
+    return line;
   }
 }
 #end
